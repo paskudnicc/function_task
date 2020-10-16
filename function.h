@@ -53,14 +53,9 @@ struct storage {
 
     storage &operator=(const storage &rhs) {
         if (this != &rhs) {
-            storage(rhs).swap(*this);
+            rhs.methods->copy(this, &rhs);
         }
         return *this;
-    }
-
-    void swap(storage &other) noexcept {
-        std::swap(methods, other.methods);
-        std::swap(obj, other.obj);
     }
 
     storage &operator=(storage &&rhs) noexcept {
@@ -73,6 +68,21 @@ struct storage {
 
     ~storage() {
         methods->destroy(this);
+    }
+
+    template<typename T>
+    T &get_small_obj() noexcept {
+        return *reinterpret_cast<T *>(&obj);
+    }
+
+    template<typename T>
+    const T &get_small_obj() const noexcept {
+        return *reinterpret_cast<const T *>(&obj);
+    }
+
+    template<typename T>
+    T *get_large_obj() const noexcept {
+        return reinterpret_cast<T *const &>(obj);
     }
 };
 
@@ -110,11 +120,11 @@ struct object_traits<T, false> {
 
         static constexpr methods<R, Args...> table{
                 [](storage_t *stg, Args... args) -> R {
-                    return (*reinterpret_cast<T *&>(stg->obj))(std::forward<Args>(args)...);
+                    return (*stg->template get_large_obj<T>())(std::forward<Args>(args)...);
                 },
 
                 [](storage_t *to, const storage_t *from) {
-                    reinterpret_cast<void *&>(to->obj) = new T(*reinterpret_cast<T *const &>(from->obj));
+                    reinterpret_cast<void *&>(to->obj) = new T(*from->template get_large_obj<T>());
                     to->methods = from->methods;
                 },
 
@@ -125,7 +135,7 @@ struct object_traits<T, false> {
                 },
 
                 [](storage_t *stg) {
-                    delete (reinterpret_cast<T *&>(stg->obj));
+                    delete stg->template get_large_obj<T>();
                 }
         };
 
@@ -141,21 +151,22 @@ struct object_traits<T, true> {
 
         static constexpr methods<R, Args...> table{
                 [](storage_t *stg, Args... args) -> R {
-                    return (reinterpret_cast<T &>((stg->obj)))(std::forward<Args>(args)...);
+                    return (stg->template get_small_obj<T>())(std::forward<Args>(args)...);
                 },
 
                 [](storage_t *to, const storage_t *from) {
-                    new(&to->obj) T(reinterpret_cast<const T &>(from->obj));
+                    new(&to->obj) T(from->template get_small_obj<T>());
                     to->methods = from->methods;
                 },
 
                 [](storage_t *to, storage_t *from) {
-                    to->obj = std::move(from->obj);
+//                    looks like it is working
+                    reinterpret_cast<T *&>(to->obj) = reinterpret_cast<T *&>(from->obj);
                     to->methods = from->methods;
                 },
 
                 [](storage_t *stg) {
-                    reinterpret_cast<T &>(stg->obj).~T();
+                    stg->template get_small_obj<T>().~T();
                 }
         };
 
@@ -209,9 +220,9 @@ public:
     T *target() noexcept {
         if (object_traits<T, is_small_v<T>>().template get_methods<R, Args...>() == stg.methods) {
             if (is_small_v<T>) {
-                return reinterpret_cast<T *>(&stg.obj);
+                return &stg.template get_small_obj<T>();
             } else {
-                return reinterpret_cast<T *&>(stg.obj);
+                return stg.template get_large_obj<T>();
             }
         } else {
             return nullptr;
@@ -222,9 +233,9 @@ public:
     [[nodiscard]] const T *target() const noexcept {
         if (object_traits<T, is_small_v<T>>().template get_methods<R, Args...>() == stg.methods) {
             if (is_small_v<T>) {
-                return reinterpret_cast<const T *>(&stg.obj);
+                return &stg.template get_small_obj<T>();
             } else {
-                return reinterpret_cast<const T *const &>(stg.obj);
+                return stg.template get_large_obj<T>();
             }
         } else {
             return nullptr;
