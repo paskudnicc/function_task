@@ -37,9 +37,12 @@ struct methods {
 };
 
 template<typename R, typename... Args>
+const methods<R, Args...> *get_empty_methods();
+
+template<typename R, typename... Args>
 struct storage {
     fn_storage_t obj;
-    methods<R, Args...> const *methods;
+    methods<R, Args...> const *methods = get_empty_methods<R, Args...>();
 
     storage() = default;
 
@@ -48,6 +51,7 @@ struct storage {
     }
 
     storage(storage &&other) noexcept {
+        methods->destroy(this);
         other.methods->move(this, &other);
     }
 
@@ -58,7 +62,7 @@ struct storage {
         return *this;
     }
 
-    storage &operator=(storage &&rhs) noexcept {
+    storage &operator=(storage &&rhs) {
         if (this != &rhs) {
             methods->destroy(this);
             rhs.methods->move(this, &rhs);
@@ -160,8 +164,7 @@ struct object_traits<T, true> {
                 },
 
                 [](storage_t *to, storage_t *from) {
-//                    looks like it is working
-                    reinterpret_cast<T *&>(to->obj) = reinterpret_cast<T *&>(from->obj);
+                    reinterpret_cast<T *&>(to->obj) = std::move(reinterpret_cast<T *&>(from->obj));
                     to->methods = from->methods;
                 },
 
