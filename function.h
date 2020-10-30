@@ -26,7 +26,7 @@ struct methods {
 
     typedef void (*copy_fn_t)(storage_t *, const storage_t *);
 
-    typedef void (*move_fn_t)(storage_t *, storage_t *);
+    typedef void (*move_fn_t)(storage_t *, storage_t *) noexcept;
 
     typedef void (*destroy_fn_t)(storage_t *);
 
@@ -51,18 +51,25 @@ struct storage {
     }
 
     storage(storage &&other) noexcept {
-        methods->destroy(this);
         other.methods->move(this, &other);
     }
 
     storage &operator=(const storage &rhs) {
+//        because we have to destroy out method OR throw a copy exception and stay valid
         if (this != &rhs) {
-            rhs.methods->copy(this, &rhs);
+            storage temp(*this);
+            methods->destroy(this);
+            try {
+                rhs.methods->copy(this, &rhs);
+            } catch (...) {
+                temp.methods->copy(this, &temp);
+                throw;
+            }
         }
         return *this;
     }
 
-    storage &operator=(storage &&rhs) {
+    storage &operator=(storage &&rhs) noexcept {
         if (this != &rhs) {
             methods->destroy(this);
             rhs.methods->move(this, &rhs);
@@ -72,11 +79,6 @@ struct storage {
 
     ~storage() {
         methods->destroy(this);
-    }
-
-    template<typename T>
-    T &get_small_obj() noexcept {
-        return *reinterpret_cast<T *>(&obj);
     }
 
     template<typename T>
@@ -103,7 +105,7 @@ const methods<R, Args...> *get_empty_methods() {
                 to->methods = from->methods;
             },
 
-            [](storage_t *to, storage_t *from) {
+            [](storage_t *to, storage_t *from) noexcept {
                 to->methods = from->methods;
             },
 
@@ -132,7 +134,7 @@ struct object_traits<T, false> {
                     to->methods = from->methods;
                 },
 
-                [](storage_t *to, storage_t *from) {
+                [](storage_t *to, storage_t *from) noexcept {
                     to->obj = from->obj;
                     to->methods = from->methods;
                     from->methods = get_empty_methods<R, Args...>();
@@ -163,9 +165,13 @@ struct object_traits<T, true> {
                     to->methods = from->methods;
                 },
 
-                [](storage_t *to, storage_t *from) {
-                    reinterpret_cast<T *&>(to->obj) = std::move(reinterpret_cast<T *&>(from->obj));
-                    to->methods = from->methods;
+                [](storage_t *to, storage_t *from) noexcept {
+                    try {
+                        to->methods = from->methods;
+                        new(&to->obj) T(std::move(from->template get_small_obj<T>()));
+                    } catch (...) {
+//                        function_test.throwing_move
+                    }
                 },
 
                 [](storage_t *stg) {
@@ -223,7 +229,7 @@ public:
     T *target() noexcept {
         if (object_traits<T, is_small_v<T>>().template get_methods<R, Args...>() == stg.methods) {
             if (is_small_v<T>) {
-                return &stg.template get_small_obj<T>();
+                return &const_cast<T&>(stg.template get_small_obj<T>());
             } else {
                 return stg.template get_large_obj<T>();
             }
