@@ -5,7 +5,7 @@
 
 template<typename T>
 constexpr bool is_small_v = sizeof(T) <= sizeof(void *)
-                            && (alignof(void *) % alignof(T) == 0);
+                            && (alignof(void *) % alignof(T) == 0) && std::is_nothrow_move_constructible<T>();;
 
 struct bad_function_call : std::exception {
     [[nodiscard]] const char *what() const noexcept override {
@@ -166,12 +166,8 @@ struct object_traits<T, true> {
                 },
 
                 [](storage_t *to, storage_t *from) noexcept {
-                    try {
-                        to->methods = from->methods;
-                        new(&to->obj) T(std::move(from->template get_small_obj<T>()));
-                    } catch (...) {
-//                        function_test.throwing_move
-                    }
+                    to->methods = from->methods;
+                    new(&to->obj) T(std::move(from->template get_small_obj<T>()));
                 },
 
                 [](storage_t *stg) {
@@ -229,7 +225,7 @@ public:
     T *target() noexcept {
         if (object_traits<T, is_small_v<T>>().template get_methods<R, Args...>() == stg.methods) {
             if (is_small_v<T>) {
-                return &const_cast<T&>(stg.template get_small_obj<T>());
+                return &const_cast<T &>(stg.template get_small_obj<T>());
             } else {
                 return stg.template get_large_obj<T>();
             }
