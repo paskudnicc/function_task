@@ -5,7 +5,7 @@
 
 template<typename T>
 constexpr bool is_small_v = sizeof(T) <= sizeof(void *)
-                            && (alignof(void *) % alignof(T) == 0) && std::is_nothrow_move_constructible<T>();;
+                            && (alignof(void *) % alignof(T) == 0) && std::is_nothrow_move_constructible<T>();
 
 struct bad_function_call : std::exception {
     [[nodiscard]] const char *what() const noexcept override {
